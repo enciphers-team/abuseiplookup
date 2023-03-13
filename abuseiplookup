@@ -1,0 +1,96 @@
+#!/bin/bash
+
+function help_menu {
+    echo "Usage: abuseiplookup [-h] [-c|-r] ip_address [-o]"
+    echo "Check or Get reports for IP address Abuse"
+    echo "Options:"
+    echo "  -c, --check   Check Abuse IP address"
+    echo "  -r, --report  Get Abuse Reports for IP Address"
+    echo "  -o, --only-abuse  Show only abusive IP (for use with -c)"
+    echo "  -h, --help    Show help message"
+    exit
+}
+
+function request_check {
+    curl -s -G https://api.abuseipdb.com/api/v2/check \
+  --data-urlencode "ipAddress=$IP_ADDRESS" \
+  -d maxAgeInDays=90 \
+  -d verbose \
+  -H "Key: $ABUSEIP_KEY" \
+  -H "Accept: application/json"
+}
+
+function request_reports {
+    curl -s -G https://api.abuseipdb.com/api/v2/reports \
+  --data-urlencode "ipAddress=$IP_ADDRESS" \
+  -d page=5 \
+  -d perPage=25 \
+  -H "Key: $ABUSEIP_KEY" \
+  -H "Accept: application/json"
+}
+
+if [[ -z "$ABUSEIP_KEY" ]]; then
+    echo "ABUSEIP_KEY environment variable is not set."
+    exit 1
+fi
+
+
+if [[ $# -eq 0 ]]; then
+    help_menu
+fi
+
+while [[ $# -gt 0 ]]; do
+    args="$1"
+
+    case $args in
+        -h|--help)
+            help_menu
+            exit
+            ;;
+        -c|--check)
+            ACTION="check"
+            IP_ADDRESS="$2"
+            shift
+            shift
+            ;;
+        -r|--report)
+            ACTION="report"
+            IP_ADDRESS="$2"
+            shift
+            shift
+            ;;
+        -o|--only-abuse)
+            if [[ $ACTION != "check" ]]; then
+                echo "Wooh!! You can not use -o option with -c"
+                help_menu
+                exit 1
+            fi
+            ONLY_ABUSE=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $args"
+            help_menu
+            exit 1
+            ;;
+    esac
+done
+
+if [[ -z $IP_ADDRESS ]]; then
+    echo "IP address is required"
+    exit 1
+fi
+
+if [[ $ACTION == "check" ]]; then
+    result=$(request_check)
+    if [[ -z $ONLY_ABUSE ]]; then
+        echo "$result" | jq '.data | {ipAddress: .ipAddress, abuseConfidenceScore: .abuseConfidenceScore, domain: .domain, hostnames: .hostnames, countryCode: .countryCode, usageType: .usageType}'
+    else
+        echo "$result" | jq '.data | select(.abuseConfidenceScore == 100) | {ipAddress: .ipAddress, abuseConfidenceScore: .abuseConfidenceScore, domain: .domain, hostnames: .hostnames, countryCode: .countryCode, usageType: .usageType}'
+    fi
+elif [[ $ACTION == "report" ]]; then
+    result=$(request_reports)
+    echo "===============> Reports for IP: $IP_ADDRESS ================>"
+    echo "$result" | jq
+fi
+
